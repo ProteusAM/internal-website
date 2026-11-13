@@ -18,6 +18,7 @@ Comptez environ 30 minutes pour la mise en place.
 | `app.js` | Le fonctionnement de l'interface |
 | `config.js` | **À remplir** : adresse et clé publique de votre projet Supabase |
 | `supabase/schema.sql` | Tables, règles d'accès et invitations (à exécuter une fois dans Supabase) |
+| `supabase/v2.sql` | Mise à jour v2 : accueil, espaces projet, documents, réglages présidence (à exécuter après `schema.sql`) |
 | `robots.txt`, `.nojekyll` | Non-référencement et compatibilité GitHub Pages |
 | `.github/workflows/keepalive.yml` | Empêche la mise en pause du projet Supabase gratuit (facultatif) |
 
@@ -152,6 +153,23 @@ Niveaux par défaut, modifiables par le Board depuis la page **Accès** :
 | Le lien de connexion renvoie vers une mauvaise page | Vérifiez **Site URL** et **Redirect URLs** dans Supabase. |
 | « Trop de demandes d'e-mail » | Configurez un SMTP dédié (étape 2.3) ou utilisez un mot de passe. |
 | Données qui ne chargent plus | Le projet Supabase est peut-être en pause : relancez-le dans le tableau de bord. |
+
+## Version 2 : accueil, espaces projet, réglages
+
+### Installer la mise à jour de la base
+1. Supabase → **SQL Editor** → **New query** → collez tout `supabase/v2.sql` → **Run**.
+2. Désignez la présidence, en remplaçant l'adresse :
+   ```sql
+   update public.profiles set is_president = true where email = 'prenom.nom@exemple.fr';
+   ```
+   La page **Réglages** apparaît alors dans le menu de ce compte, et de lui seul.
+
+### Ce qui arrive
+- **Accueil** : actualités (épinglables par le Board) et fil de discussion. Par défaut, tout le monde lit et l'écriture est ouverte à partir de **Board ext** ; réglable dans la page Accès.
+- **Projets** : chaque projet reçoit un identifiant (`PRJ-001`…). À la création, on désigne le chef de projet, qui peut être une autre personne que le créateur. Le Board et les chefs de projet associent les membres. **Seul le Board voit tous les projets** ; tous les autres profils, Board ext compris, ne voient que les projets dont ils font partie.
+- **Espace projet** : équipe, tâches avec matrice RACI, kanban (glisser-déposer), Gantt, documents classés (CR de réunion, devis, plan moyen terme). Les membres du projet modifient les tâches et publient des documents ; le chef et le Board gèrent l'équipe et les infos.
+- **Page Documents** : liste des documents utiles de l'association, téléchargeables par tous ceux qui ont accès à la page (Membre par défaut). **Seul le Board ajoute ou supprime des documents** ; ce réglage est fixe. Fichiers privés, 50 Mo maximum chacun.
+- **Réglages** (présidence uniquement) : nom du site, couleur, logo carré. Aperçu en direct avant enregistrement.
 
 ## Mode démo (caché)
 

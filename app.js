@@ -260,6 +260,12 @@ function screenLogin(msg, kind){
     if(error) screenLogin("E-mail ou mot de passe incorrect. Sans mot de passe, utilisez le lien de connexion.","err");
   });
 }
+/* Déconnexion : on efface les données en mémoire et tout le contenu affiché. */
+function wipe(){
+  Object.assign(S,{tx:[],projects:[],events:[],partners:[],members:[],invitations:[],access:null,legal:null,finance:null,stats:null,me:null,loaded:false,loadError:null,preview:null,clearArm:false,txSearch:""});
+  for(const id of ["main","menu","who","modal-root"]){const el=document.getElementById(id);if(el) el.innerHTML="";}
+  const t=document.getElementById("toast"); if(t) t.hidden=true;
+}
 function showApp(){document.getElementById("auth-root").hidden=true;document.getElementById("app").hidden=false;}
 
 /* ---------- rendu : structure ---------- */
@@ -719,7 +725,7 @@ function exitDemo(){
   demoBackup=null;
   document.body.classList.remove("is-demo");
   document.getElementById("modal-root").innerHTML="";
-  if(!S.session){ screenLogin(); return; }
+  if(!S.session){ wipe(); screenLogin(); return; }
   route(); loadAll().catch(()=>{});
   toast("Mode démo quitté");
 }
@@ -747,7 +753,7 @@ sb.auth.onAuthStateChange((event, session)=>{
   const was = S.session?.user?.id;
   S.session = session;
   if(!session){
-    S.loaded=false; S.me=null; S.preview=null;
+    wipe();
     if(channel){sb.removeChannel(channel);channel=null;}
     screenLogin();
     return;

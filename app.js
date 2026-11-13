@@ -96,6 +96,7 @@ function canEditPage(p){return role()>=1 && role() >= (access()[p]?.edit ?? 4);}
 
 /* ---------- données ---------- */
 async function loadAll(){
+  if(S.demo) return;
   const [tx,pr,ev,pa,pf,st,se,inv] = await Promise.all([
     sb.from("transactions").select("*"),
     sb.from("projects").select("*"),
@@ -119,6 +120,7 @@ async function loadAll(){
 }
 function clean(d){const o={};for(const [k,v] of Object.entries(d)) o[k]=(v===""?null:v);return o;}
 async function save(key,id,data){
+  if(S.demo){ const body=clean(data); if(id){S[key]=S[key].map(x=>x.id===id?{...x,...body}:x);} else S[key]=[...S[key],{id:crypto.randomUUID(),...body}]; render(); return; }
   const t=TABLES[key], body=clean(data);
   const prev = id ? S[key].find(x=>x.id===id) : null;
   if(prev?.exemple) body.exemple=true;
@@ -128,12 +130,14 @@ async function save(key,id,data){
   await loadAll();
 }
 async function remove(key,id){
+  if(S.demo){ S[key]=S[key].filter(x=>(key==="invitations"?x.email:x.id)!==id); render(); return; }
   const r = await sb.from(TABLES[key]).delete().eq(key==="invitations"?"email":"id",id).select();
   if(r.error) throw r.error;
   if(!r.data || !r.data.length) throw {code:"denied"};
   await loadAll();
 }
 async function setSetting(key,value){
+  if(S.demo){ S[key]=value; render(); return; }
   const r = await sb.from("settings").upsert({key,value}).select();
   if(r.error) throw r.error;
   if(!r.data || !r.data.length) throw {code:"denied"};
@@ -280,6 +284,11 @@ function header(p, extra=""){
 }
 function banners(){
   let b = `<div class="mobile-bar"><span>${esc(S.me?.nom||"")} · ${esc(ROLES[realRole()])}</span>${realRole()>=4?`<select data-preview aria-label="Voir en tant que">${[4,3,2,1].map(r=>`<option value="${r}" ${role()===r?"selected":""}>Vue ${ROLES[r]}</option>`).join("")}</select>`:""}<button class="btn sm" data-act="password">Mot de passe</button><button class="btn sm" data-act="logout">Déconnexion</button></div>`;
+  if(S.demo){
+    b+=`<div class="banner blue"><b>Mode démo</b> · Données fictives, rien n'est enregistré ni envoyé. Vos vraies données ne sont pas touchées. <button class="btn sm primary" data-act="exit-demo">Quitter la démo</button></div>`;
+    if(S.preview && S.preview!==realRole()) b+=`<div class="banner">Aperçu en tant que <b>${esc(ROLES[S.preview])}</b>. <button class="btn sm" data-act="end-preview">Revenir au profil Board</button></div>`;
+    return b;
+  }
   if(S.loadError) b+=`<div class="banner warn">Certaines données n'ont pas pu être chargées (${esc(S.loadError.message||"erreur réseau")}). Rechargez la page ; si le problème continue, le projet Supabase est peut-être en pause.</div>`;
   if(S.preview && S.preview!==realRole()) b+=`<div class="banner blue">Aperçu en tant que <b>${esc(ROLES[S.preview])}</b>. L'affichage change, mais la base vous laisse vos droits réels. <button class="btn sm" data-act="end-preview">Revenir à mon profil</button></div>`;
   const allEmpty = S.loaded && ["tx","projects","events","partners"].every(k=>!S[k].length);
@@ -316,7 +325,7 @@ function pBoard(){
   const upcoming=S.events.filter(e=>e.date>=todayISO).sort((a,b)=>(a.date+(a.heure||"")).localeCompare(b.date+(b.heure||"")));
   const finOk=canView("finances");
   const nMembres = st.membres ?? S.members.filter(m=>m.statut!=="Ancien").length;
-  const nAttente = st.cotisations_attente ?? 0;
+  const nAttente = st.cotisations_attente ?? S.members.filter(m=>m.statut!=="Ancien"&&m.cotisation!=="Payée"&&m.cotisation!=="Exonéré").length;
   const nProj = st.projets_en_cours ?? inProg.length;
   const n30 = st.actions_30j ?? upcoming.filter(e=>e.date<=h30).length;
   const next = st.prochaine_action || upcoming[0]?.date;
@@ -611,7 +620,14 @@ document.addEventListener("input",e=>{ if(e.target.id==="tx-search"){S.txSearch=
 function act(a,id){
   const find=arr=>arr.find(x=>x.id===id)||{};
   const L=legalDoc();
+  if(S.demo){
+    if(a==="logout"||a==="exit-demo"){exitDemo();return;}
+    if(a==="password"||a==="resend"){toast("Indisponible en mode démo.");return;}
+    if(a==="load-ex"||a==="clear-ex") return;
+    if(a==="invite"){openForm("Inviter un membre",F_INV(),{},async d=>{S.invitations=[...S.invitations,{email:String(d.email).trim().toLowerCase(),nom:d.nom,role:Number(d.role),pole:d.pole||null,invited_at:new Date().toISOString()}];render();setTimeout(()=>toast("Démo : aucune invitation n'est réellement envoyée."),50);});return;}
+  }
   switch(a){
+    case "exit-demo": exitDemo(); break;
     case "logout": sb.auth.signOut(); break;
     case "password": openForm("Définir mon mot de passe",[{k:"pwd",label:"Nouveau mot de passe",type:"password",req:true,full:true,auto:"new-password",hint:"8 caractères minimum. Le lien de connexion reste utilisable."}],{},async d=>{if(String(d.pwd).length<8) throw {message:"8 caractères minimum."};const {error}=await sb.auth.updateUser({password:d.pwd});if(error) throw error;}); break;
     case "end-preview": S.preview=null; render(); break;
@@ -671,6 +687,53 @@ async function clearExamples(){
   }catch(e){toast(errMsg(e));}
 }
 
+/* ---------- mode démo (caché : Ctrl + Alt + D, ou 5 appuis rapides sur le logo) ----------
+   Données fictives en mémoire uniquement : aucune lecture ni écriture dans Supabase. */
+let demoBackup = null;
+function demoData(){
+  const d=n=>iso(new Date(today.getFullYear(),today.getMonth(),today.getDate()+n));
+  const id=()=>crypto.randomUUID();
+  const projects=[["Bras robotique 6 axes","Équipe Robotique",-70,2400,"Robotique","En cours"],["Banc d'essai moteur Stirling","Équipe Énergie",-40,1500,"Énergie","En cours"],["Drone d'inspection","Équipe Aéronautique",-12,3200,"Aéronautique","Idée"],["Exosquelette d'assistance","Équipe Mécanique",-150,4200,"Mécanique","En pause"],["Site vitrine de l'antenne","Pôle Communication",-100,300,"Informatique","Terminé"],["Capteurs IoT pour l'atelier","Équipe Électronique",-25,900,"Électronique","En cours"]].map(([nom,pilote,l,budget,categorie,statut])=>({id:id(),nom,pilote,lancement:d(l),budget,categorie,statut,lien:"https://example.org/projet"}));
+  const tx=[[-130,"entree","Cotisations de rentrée",1450,"Cotisations"],[-118,"sortie","Hébergement web et domaine",84,"Communication",4],[-102,"entree","Subvention BDE",800,"Subvention"],[-88,"sortie","Moteurs pas-à-pas",410,"Projet",3],[-62,"sortie","Servomoteurs et visserie",640,"Projet",0],[-45,"sortie","Afterwork d'intégration",380,"Événement"],[-30,"entree","Sponsoring — partenaire industriel",2000,"Sponsoring"],[-21,"sortie","Composants banc Stirling",520,"Projet",1],[-14,"sortie","Microcontrôleurs et capteurs",265,"Projet",5],[-6,"sortie","Impression affiches conférence",95,"Communication"],[-2,"sortie","Frais de tenue de compte",12,"Frais bancaires"],[9,"sortie","Location salle conférence",450,"Événement"],[24,"entree","Subvention école (2e versement)",1200,"Subvention"],[38,"sortie","Commande cartes électroniques",900,"Projet",0],[52,"entree","Cotisations du 2e semestre",600,"Cotisations"],[66,"sortie","Déplacement salon hors les murs",780,"Logistique"],[80,"sortie","Matériaux composites drone",1150,"Projet",2]].map(([o,sens,libelle,montant,categorie,pi])=>({id:id(),date:d(o),sens,libelle,montant,categorie,tiers:"",projet:pi!==undefined?projects[pi].id:null}));
+  const events=[[-4,"Cours soudure électronique","Cours","17:00","Fablab"],[3,"Afterwork de mi-novembre","Afterwork","19:00","Foyer"],[9,"Conférence : l'industrie 5.0","Conférence","18:30","Amphi A"],[14,"Cours CAO — niveau 1","Cours","17:00","Salle B204"],[16,"Cours CAO — niveau 2","Cours","17:00","Salle B204"],[21,"Réunion Board ext","Réunion","12:30","Local asso"],[28,"Visite d'usine partenaire","Hors les murs","09:00","Site partenaire"],[35,"Conférence : énergie et territoires","Conférence","18:30","Amphi B"],[42,"Afterwork de fin d'année","Afterwork","19:00","Foyer"]].map(([o,titre,type,heure,lieu])=>({id:id(),date:d(o),titre,type,heure,lieu,description:"Événement de démonstration."}));
+  const partners=[["Partenaire industriel","Sponsor","Signé",2000,null,"Responsable RSE"],["Bureau d'études local","Entreprise","En discussion",1500,d(5),"Directeur technique"],["Fablab du campus","Institution","Prospect",null,d(-2),"Coordinatrice"],["Équipementier régional","Sponsor","En discussion",3000,d(12),"Service communication"],["Association étudiante voisine","Association","Signé",null,null,"Bureau"]].map(([nom,type,statut,montant,relance,contact])=>({id:id(),nom,type,statut,montant,relance,contact}));
+  const people=[["Camille Durand",4,"Présidence","Payée"],["Louis Bernard",4,"Trésorerie","Payée"],["Inès Moreau",4,"Secrétariat","Payée"],["Hugo Petit",3,"Partenariats","Payée"],["Sarah Lefèvre",3,"Communication","Payée"],["Nathan Roux",3,"Événementiel","En attente"],["Léa Fournier",2,"Projets techniques","Payée"],["Tom Girard",2,"Projets techniques","Payée"],["Chloé Bonnet",2,"Projets techniques","En attente"],["Mathis Lambert",1,"Formation","Payée"],["Jade Fontaine",1,"Événementiel","En attente"],["Enzo Chevalier",1,"Communication","Exonéré"],["Manon Robin",1,"","Payée"],["Lucas Faure",1,"","En attente"]].map(([nom,role,pole,cotisation],i)=>({id:id(),nom,email:nom.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(" ",".")+"@exemple.fr",role,pole,promo:"2028",cotisation,statut:"Actif"}));
+  people.push({id:id(),nom:"Ancien Membre",email:"ancien@exemple.fr",role:1,pole:"",promo:"2025",cotisation:"Payée",statut:"Ancien"});
+  const me={id:"demo-me",nom:"Vous (démo)",email:"demo@exemple.fr",role:4,pole:"Présidence",promo:"2028",cotisation:"Payée",statut:"Actif"};
+  return {tx,projects,events,partners,members:[me,...people],invitations:[{email:"nouveau.membre@exemple.fr",nom:"Nouveau Membre",role:1,pole:"Formation",invited_at:new Date().toISOString()}],me,
+    finance:{soldeInitial:250,dateInitiale:d(-140)},
+    legal:{...DEFAULT_LEGAL,identite:DEFAULT_LEGAL.identite.map(([k,v])=>[k,v||({"N° RNA":"W000000000","SIREN / SIRET":"000 000 000 00000","Siège social":"Adresse fictive de démonstration","Déclaration en préfecture":"1er septembre 2025","Publication JOAFE":"Septembre 2025","Président·e":"Camille Durand","Trésorier·ère":"Louis Bernard","Secrétaire":"Inès Moreau","Assurance RC":"Contrat de démonstration"})[k]||""]),raison:"Donner aux étudiants des Arts et Métiers les moyens de mener des projets techniques ambitieux, de les partager et de rencontrer l'industrie. (Texte de démonstration)"}};
+}
+function enterDemo(){
+  if(S.demo) return;
+  demoBackup = {session:S.session, me:S.me, tx:S.tx, projects:S.projects, events:S.events, partners:S.partners, members:S.members, invitations:S.invitations, access:S.access, legal:S.legal, finance:S.finance, stats:S.stats, loaded:S.loaded, preview:S.preview};
+  const D = demoData();
+  Object.assign(S, {demo:true, session:{user:{id:"demo-me",email:"demo@exemple.fr"}}, me:D.me, tx:D.tx, projects:D.projects, events:D.events, partners:D.partners, members:D.members, invitations:D.invitations, access:null, legal:D.legal, finance:D.finance, stats:null, loaded:true, preview:null, loadError:null});
+  document.body.classList.add("is-demo");
+  route();
+  toast("Mode démo activé · Ctrl + Alt + D pour quitter");
+}
+function exitDemo(){
+  if(!S.demo) return;
+  Object.assign(S, demoBackup, {demo:false, clearArm:false});
+  demoBackup=null;
+  document.body.classList.remove("is-demo");
+  document.getElementById("modal-root").innerHTML="";
+  if(!S.session){ screenLogin(); return; }
+  route(); loadAll().catch(()=>{});
+  toast("Mode démo quitté");
+}
+function toggleDemo(){ S.demo ? exitDemo() : enterDemo(); }
+document.addEventListener("keydown",e=>{
+  if(e.ctrlKey && e.altKey && !e.shiftKey && e.code==="KeyD"){ e.preventDefault(); if(sb) toggleDemo(); }
+});
+let logoTaps=[];
+document.addEventListener("click",e=>{
+  if(!e.target.closest(".logo, .auth-brand h1")) return;
+  const now=Date.now(); logoTaps=logoTaps.filter(t=>now-t<2000); logoTaps.push(now);
+  if(logoTaps.length>=5 && sb){ logoTaps=[]; toggleDemo(); }
+});
+
 /* ---------- navigation ---------- */
 function route(){const h=location.hash.slice(1);S.route=PAGES.some(p=>p.id===h)?h:"board";render();window.scrollTo(0,0);}
 window.addEventListener("hashchange",route);
@@ -680,6 +743,7 @@ if(!CFG.supabaseUrl || !CFG.supabaseAnonKey || /VOTRE/i.test(CFG.supabaseUrl+CFG
 sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, {auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:true}});
 let channel=null, rt=0;
 sb.auth.onAuthStateChange((event, session)=>{
+  if(S.demo && demoBackup){ demoBackup.session = session; if(!session){demoBackup.loaded=false;demoBackup.me=null;} return; }
   const was = S.session?.user?.id;
   S.session = session;
   if(!session){

@@ -153,6 +153,14 @@ Niveaux par défaut, modifiables par le Board depuis la page **Accès** :
 | « Trop de demandes d'e-mail » | Configurez un SMTP dédié (étape 2.3) ou utilisez un mot de passe. |
 | Données qui ne chargent plus | Le projet Supabase est peut-être en pause : relancez-le dans le tableau de bord. |
 
+## Mode démo (caché)
+
+Pour présenter l'outil sans montrer les vraies données :
+- **Ordinateur** : appuyez sur **Ctrl + Alt + D**, sur l'écran de connexion ou une fois connecté·e.
+- **Téléphone** : touchez **5 fois rapidement** le logo « ProteusBoard ».
+
+Le site se remplit de données fictives : projets, finances, calendrier, membres, partenaires. Vous pouvez tout manipuler, y compris l'aperçu par profil. **Rien n'est lu ni écrit dans Supabase.** Le même raccourci (ou le bouton « Quitter la démo ») ramène à l'état normal, et recharger la page quitte aussi la démo.
+
 ## Modifier le site
 
 Les listes (pôles, catégories techniques, types d'événements, catégories de dépenses) sont en haut de `app.js`, dans la partie « constantes ». Après une modification, renvoyez le fichier sur GitHub : le site se met à jour en une minute.
